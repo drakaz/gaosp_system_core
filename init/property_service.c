@@ -54,7 +54,8 @@ struct {
     unsigned int uid;
     unsigned int gid;
 } property_perms[] = {
-    { "net.rmnet0.",      AID_RADIO,    0 },
+ // drakaz : replace rmnet0 for pdp0
+    { "net.pdp0.",      AID_RADIO,    0 },
     { "net.gprs.",        AID_RADIO,    0 },
     { "net.ppp",          AID_RADIO,    0 },
     { "ril.",             AID_RADIO,    0 },
