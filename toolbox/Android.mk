@@ -45,7 +45,7 @@ TOOLS := \
 	vmstat
 
 ifndef TINY_TOOLBOX
-    TOOLS +=
+    TOOLS += \
         ls \
         mount \
         rm \
