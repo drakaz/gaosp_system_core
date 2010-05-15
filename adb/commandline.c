@@ -105,13 +105,14 @@ void help()
         "                                 environment variable is used, which must\n"
         "                                 be an absolute path.\n"
         " devices                       - list all connected devices\n"
-        " connect <host>:<port>         - connect to a device via TCP/IP"
-        " disconnect <host>:<port>      - disconnect from a TCP/IP device"
+        " connect <host>:<port>         - connect to a device via TCP/IP\n"
+        " disconnect <host>:<port>      - disconnect from a TCP/IP device\n"
         "\n"
         "device commands:\n"
         "  adb push <local> <remote>    - copy file/dir to device\n"
         "  adb pull <remote> [<local>]  - copy file/dir from device\n"
         "  adb sync [ <directory> ]     - copy host->device only if changed\n"
+        "                                 (-l means list but don't copy)\n"
         "                                 (see 'adb help all')\n"
         "  adb shell                    - run remote shell interactively\n"
         "  adb shell <command>          - run remote shell command\n"
@@ -220,8 +221,8 @@ static void read_and_dump(int fd)
             if(errno == EINTR) continue;
             break;
         }
-        /* we want to output to stdout, so no adb_write here !! */
-        unix_write(1, buf, len);
+        fwrite(buf, 1, len, stdout);
+        fflush(stdout);
     }
 }
 
@@ -760,6 +761,7 @@ int adb_commandline(int argc, char **argv)
     int quote;
     transport_type ttype = kTransportAny;
     char* serial = NULL;
+    char* server_port_str = NULL;
 
         /* If defined, this should be an absolute path to
          * the directory containing all of the various system images
@@ -775,7 +777,20 @@ int adb_commandline(int argc, char **argv)
 
     serial = getenv("ANDROID_SERIAL");
 
-        /* modifiers and flags */
+    /* Validate and assign the server port */
+    server_port_str = getenv("ANDROID_ADB_SERVER_PORT");
+    int server_port = DEFAULT_ADB_PORT;
+    if (server_port_str && strlen(server_port_str) > 0) {
+        server_port = (int) strtol(server_port_str, NULL, 0);
+        if (server_port <= 0) {
+            fprintf(stderr,
+                    "adb: Env var ANDROID_ADB_SERVER_PORT must be a positive number. Got \"%s\"\n",
+                    server_port_str);
+            return usage();
+        }
+    }
+
+    /* modifiers and flags */
     while(argc > 0) {
         if(!strcmp(argv[0],"nodaemon")) {
             no_daemon = 1;
@@ -804,7 +819,7 @@ int adb_commandline(int argc, char **argv)
             if (isdigit(argv[0][2])) {
                 serial = argv[0] + 2;
             } else {
-                if(argc < 2) return usage();
+                if(argc < 2 || argv[0][2] != '\0') return usage();
                 serial = argv[1];
                 argc--;
                 argv++;
@@ -822,12 +837,13 @@ int adb_commandline(int argc, char **argv)
     }
 
     adb_set_transport(ttype, serial);
+    adb_set_tcp_specifics(server_port);
 
     if ((argc > 0) && (!strcmp(argv[0],"server"))) {
         if (no_daemon || is_daemon) {
-            r = adb_main(is_daemon);
+            r = adb_main(is_daemon, server_port);
         } else {
-            r = launch_server();
+            r = launch_server(server_port);
         }
         if(r) {
             fprintf(stderr,"* could not start server *\n");
@@ -892,10 +908,10 @@ top:
             /* quote empty strings and strings with spaces */
             quote = (**argv == 0 || strchr(*argv, ' '));
             if (quote)
-            	strcat(buf, "\"");
+                strcat(buf, "\"");
             strcat(buf, *argv++);
             if (quote)
-            	strcat(buf, "\"");
+                strcat(buf, "\"");
         }
 
         for(;;) {
@@ -1041,10 +1057,19 @@ top:
 
     if(!strcmp(argv[0], "sync")) {
         char *srcarg, *android_srcpath, *data_srcpath;
+        int listonly = 0;
+
         int ret;
         if(argc < 2) {
             /* No local path was specified. */
             srcarg = NULL;
+        } else if (argc >= 2 && strcmp(argv[1], "-l") == 0) {
+            listonly = 1;
+            if (argc == 3) {
+                srcarg = argv[2];
+            } else {
+                srcarg = NULL;
+            }
         } else if(argc == 2) {
             /* A local path or "android"/"data" arg was specified. */
             srcarg = argv[1];
@@ -1055,9 +1080,9 @@ top:
         if(ret != 0) return usage();
 
         if(android_srcpath != NULL)
-            ret = do_sync_sync(android_srcpath, "/system");
+            ret = do_sync_sync(android_srcpath, "/system", listonly);
         if(ret == 0 && data_srcpath != NULL)
-            ret = do_sync_sync(data_srcpath, "/data");
+            ret = do_sync_sync(data_srcpath, "/data", listonly);
 
         free(android_srcpath);
         free(data_srcpath);

@@ -5,11 +5,10 @@ TOOLS := \
 	cat \
 	ps \
 	kill \
-	ln \
 	insmod \
 	rmmod \
 	lsmod \
-	ifconfig \
+    ifconfig \
 	setconsole \
 	mkdir \
 	rmdir \
@@ -42,10 +41,12 @@ TOOLS := \
 	top \
 	iftop \
 	id \
+	uptime \
 	vmstat
 
 ifndef TINY_TOOLBOX
     TOOLS += \
+        ln \
         ls \
         mount \
         rm \
