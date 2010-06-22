@@ -72,21 +72,6 @@ __RCSID("$NetBSD: trap.c,v 1.31 2005/01/11 19:38:57 christos Exp $");
 #define S_HARD_IGN 4		/* signal is ignored permenantly */
 #define S_RESET 5		/* temporary - to reset a hard ignored sig */
 
-static const char *sys_signame[NSIG] = {
-	"Unused",
-	"HUP",      "INT",    "QUIT",    "ILL",
-	"TRAP",     "ABRT",   "BUS",     "FPE",
-	"KILL",     "USR1",   "SEGV",    "USR2",
-	"PIPE",     "ALRM",   "TERM",
-	"Unknown",
-	"CHLD",
-	"CONT",     "STOP",   "TSTP",    "TTIN",
-	"TTOU",     "URG",    "XCPU",    "XFSZ",
-	"VTALRM",   "PROF",   "WINCH",   "IO",
-	"PWR",      "SYS"
-};
-
-
 char *trap[NSIG+1];		/* trap handler commands */
 MKINIT char sigmode[NSIG];	/* current value of signal */
 char gotsig[NSIG];		/* indicates specified signal received */
