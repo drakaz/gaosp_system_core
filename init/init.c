@@ -33,6 +33,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/reboot.h>
+#include <unistd.h>
 
 #include <cutils/sockets.h>
 #include <termios.h>
@@ -848,6 +849,8 @@ int main(int argc, char **argv)
     drain_action_queue();
 
     INFO("device init\n");
+    // Nopy : wait for kernel's device initialisation (mmc)
+    usleep(2000000);
     device_fd = device_init();
 
     property_init();
