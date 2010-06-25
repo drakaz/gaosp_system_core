@@ -8,7 +8,7 @@ TOOLS := \
 	insmod \
 	rmmod \
 	lsmod \
-    ifconfig \
+	ifconfig \
 	setconsole \
 	mkdir \
 	rmdir \

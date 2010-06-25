@@ -175,6 +175,9 @@ pgetc(void)
 	return pgetc_macro();
 }
 
+int in_interactive_mode() {
+    return parsefile != NULL && parsefile->fd == 0;
+}
 
 static int
 preadfd(void)
@@ -221,7 +224,7 @@ retry:
                     /* Add non-blank lines to history. */
                     linenoiseHistoryAdd(rl_start);
                 }
-                out2str("\r\n");
+                out2str("\n");
                 /* Client expects a newline at end of input, doesn't expect null */
                 rl_start[el_len++] = '\n';
             }
