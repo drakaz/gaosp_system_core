@@ -1,9 +1,5 @@
 # Copyright 2005 The Android Open Source Project
 
-NATIVE := false
-
-ifeq ($(NATIVE), true)
-
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
@@ -35,4 +31,3 @@ LOCAL_STATIC_LIBRARIES := libcutils libc
 
 include $(BUILD_EXECUTABLE)
 
-endif
