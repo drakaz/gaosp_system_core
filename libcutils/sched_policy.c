@@ -27,8 +27,10 @@
 #include "cutils/log.h"
 
 #ifdef HAVE_SCHED_H
+#ifdef HAVE_PTHREADS
 
 #include <sched.h>
+#include <pthread.h>
 
 #include <cutils/sched_policy.h>
 
@@ -42,56 +44,83 @@
 
 #define POLICY_DEBUG 0
 
+static pthread_once_t the_once = PTHREAD_ONCE_INIT;
+
 static int __sys_supports_schedgroups = -1;
 
-static int add_tid_to_cgroup(int tid, const char *grp_name)
+// File descriptors open to /dev/cpuctl/../tasks, setup by initialize, or -1 on error.
+static int normal_cgroup_fd = -1;
+static int bg_cgroup_fd = -1;
+
+/* Add tid to the scheduling group defined by the policy */
+static int add_tid_to_cgroup(int tid, SchedPolicy policy)
 {
     int fd;
-    char path[255];
-    char text[64];
 
-    sprintf(path, "/dev/cpuctl/%s/tasks", grp_name);
+    if (policy == SP_BACKGROUND) {
+        fd = bg_cgroup_fd;
+    } else {
+        fd = normal_cgroup_fd;
+    }
 
-    if ((fd = open(path, O_WRONLY)) < 0) {
-        LOGE("add_tid_to_cgroup failed to open '%s' (%s)\n", path,
-             strerror(errno));
+    if (fd < 0) {
+        SLOGE("add_tid_to_cgroup failed; background=%d\n",
+              policy == SP_BACKGROUND ? 1 : 0);
         return -1;
     }
 
-    sprintf(text, "%d", tid);
-    if (write(fd, text, strlen(text)) < 0) {
-        close(fd);
-	/*
-	 * If the thread is in the process of exiting,
-	 * don't flag an error
-	 */
-	if (errno == ESRCH)
-		return 0;
-        LOGW("add_tid_to_cgroup failed to write '%s' (%s)\n", path,
-             strerror(errno));
+    // specialized itoa -- works for tid > 0
+    char text[22];
+    char *end = text + sizeof(text) - 1;
+    char *ptr = end;
+    *ptr = '\0';
+    while (tid > 0) {
+        *--ptr = '0' + (tid % 10);
+        tid = tid / 10;
+    }
+
+    if (write(fd, ptr, end - ptr) < 0) {
+        /*
+         * If the thread is in the process of exiting,
+         * don't flag an error
+         */
+        if (errno == ESRCH)
+                return 0;
+        SLOGW("add_tid_to_cgroup failed to write '%s' (%s); background=%d\n",
+              ptr, strerror(errno), policy == SP_BACKGROUND ? 1 : 0);
         return -1;
     }
 
-    close(fd);
     return 0;
 }
 
-static inline void initialize()
-{
-    if (__sys_supports_schedgroups < 0) {
-        if (!access("/dev/cpuctl/tasks", F_OK)) {
-            __sys_supports_schedgroups = 1;
-        } else {
-            __sys_supports_schedgroups = 0;
+static void __initialize(void) {
+    char* filename;
+    if (!access("/dev/cpuctl/tasks", F_OK)) {
+        __sys_supports_schedgroups = 1;
+
+        filename = "/dev/cpuctl/tasks";
+        normal_cgroup_fd = open(filename, O_WRONLY);
+        if (normal_cgroup_fd < 0) {
+            SLOGE("open of %s failed: %s\n", filename, strerror(errno));
         }
+
+        filename = "/dev/cpuctl/bg_non_interactive/tasks";
+        bg_cgroup_fd = open(filename, O_WRONLY);
+        if (bg_cgroup_fd < 0) {
+            SLOGE("open of %s failed: %s\n", filename, strerror(errno));
+        }
+    } else {
+        __sys_supports_schedgroups = 0;
     }
 }
 
 /*
  * Try to get the scheduler group.
  *
- * The data from /proc/<pid>/cgroup looks like:
+ * The data from /proc/<pid>/cgroup looks (something) like:
  *  2:cpu:/bg_non_interactive
+ *  1:cpuacct:/
  *
  * We return the part after the "/", which will be an empty string for
  * the default cgroup.  If the string is longer than "bufLen", the string
@@ -101,34 +130,57 @@ static int getSchedulerGroup(int tid, char* buf, size_t bufLen)
 {
 #ifdef HAVE_ANDROID_OS
     char pathBuf[32];
-    char readBuf[256];
-    ssize_t count;
-    int fd;
+    char lineBuf[256];
+    FILE *fp;
 
     snprintf(pathBuf, sizeof(pathBuf), "/proc/%d/cgroup", tid);
-    if ((fd = open(pathBuf, O_RDONLY)) < 0) {
+    if (!(fp = fopen(pathBuf, "r"))) {
         return -1;
     }
 
-    count = read(fd, readBuf, sizeof(readBuf));
-    if (count <= 0) {
-        close(fd);
-        errno = ENODATA;
-        return -1;
+    while(fgets(lineBuf, sizeof(lineBuf) -1, fp)) {
+        char *next = lineBuf;
+        char *subsys;
+        char *grp;
+        size_t len;
+
+        /* Junk the first field */
+        if (!strsep(&next, ":")) {
+            goto out_bad_data;
+        }
+
+        if (!(subsys = strsep(&next, ":"))) {
+            goto out_bad_data;
+        }
+
+        if (strcmp(subsys, "cpu")) {
+            /* Not the subsys we're looking for */
+            continue;
+        }
+
+        if (!(grp = strsep(&next, ":"))) {
+            goto out_bad_data;
+        }
+        grp++; /* Drop the leading '/' */
+        len = strlen(grp);
+        grp[len-1] = '\0'; /* Drop the trailing '\n' */
+
+        if (bufLen <= len) {
+            len = bufLen - 1;
+        }
+        strncpy(buf, grp, len);
+        buf[len] = '\0';
+        fclose(fp);
+        return 0;
     }
-    close(fd);
 
-    readBuf[--count] = '\0';    /* remove the '\n', now count==strlen */
-
-    char* cp = strchr(readBuf, '/');
-    if (cp == NULL) {
-        readBuf[sizeof(readBuf)-1] = '\0';
-        errno = ENODATA;
-        return -1;
-    }
-
-    memcpy(buf, cp+1, count);   /* count-1 for cp+1, count+1 for NUL */
-    return 0;
+    SLOGE("Failed to find cpu subsys");
+    fclose(fp);
+    return -1;
+ out_bad_data:
+    SLOGE("Bad cgroup data {%s}", lineBuf);
+    fclose(fp);
+    return -1;
 #else
     errno = ENOSYS;
     return -1;
@@ -137,7 +189,7 @@ static int getSchedulerGroup(int tid, char* buf, size_t bufLen)
 
 int get_sched_policy(int tid, SchedPolicy *policy)
 {
-    initialize();
+    pthread_once(&the_once, __initialize);
 
     if (__sys_supports_schedgroups) {
         char grpBuf[32];
@@ -169,7 +221,7 @@ int get_sched_policy(int tid, SchedPolicy *policy)
 
 int set_sched_policy(int tid, SchedPolicy policy)
 {
-    initialize();
+    pthread_once(&the_once, __initialize);
 
 #if POLICY_DEBUG
     char statfile[64];
@@ -195,22 +247,16 @@ int set_sched_policy(int tid, SchedPolicy policy)
         strncpy(thread_name, p, (q-p));
     }
     if (policy == SP_BACKGROUND) {
-        LOGD("vvv tid %d (%s)", tid, thread_name);
+        SLOGD("vvv tid %d (%s)", tid, thread_name);
     } else if (policy == SP_FOREGROUND) {
-        LOGD("^^^ tid %d (%s)", tid, thread_name);
+        SLOGD("^^^ tid %d (%s)", tid, thread_name);
     } else {
-        LOGD("??? tid %d (%s)", tid, thread_name);
+        SLOGD("??? tid %d (%s)", tid, thread_name);
     }
 #endif
 
     if (__sys_supports_schedgroups) {
-        const char *grp = "";
-
-        if (policy == SP_BACKGROUND) {
-            grp = "bg_non_interactive";
-        }
-
-        if (add_tid_to_cgroup(tid, grp)) {
+        if (add_tid_to_cgroup(tid, policy)) {
             if (errno != ESRCH && errno != ENOENT)
                 return -errno;
         }
@@ -227,4 +273,5 @@ int set_sched_policy(int tid, SchedPolicy policy)
     return 0;
 }
 
+#endif /* HAVE_PTHREADS */
 #endif /* HAVE_SCHED_H */

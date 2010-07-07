@@ -80,8 +80,8 @@
  * f - 1st fp operand (register) (bits 12-14)
  * g - 2nd fp operand (register) (bits 16-18)
  * h - 3rd fp operand (register/immediate) (bits 0-4)
- * i - bfx lsb literal (bits 7-11)
  * j - xtb rotate literal (bits 10-11)
+ * i - bfx lsb literal (bits 7-11)
  * w - bfx width literal (bits 16-20)
  * b - branch address
  * t - thumb branch address (bits 24, 0-23)
@@ -411,6 +411,10 @@ disasm(const disasm_interface_t *di, u_int loc, int altfmt)
 			else
 				di->di_printf("f%d", insn & 7);
 			break;
+		/* j - xtb rotate literal (bits 10-11) */
+		case 'j':
+			di->di_printf("ror #%d", ((insn >> 10) & 3) << 3);
+			break;
         /* i - bfx lsb literal (bits 7-11) */
         case 'i':
             di->di_printf("#%d", (insn >> 7) & 31);
@@ -419,10 +423,6 @@ disasm(const disasm_interface_t *di, u_int loc, int altfmt)
         case 'w':
             di->di_printf("#%d", 1 + ((insn >> 16) & 31));
             break;
-              /* j - xtb rotate literal (bits 10-11) */
-               case 'j':
-                       di->di_printf("ror #%d", ((insn >> 10) & 3) << 3);
-                       break;
 		/* b - branch address */
 		case 'b':
 			branch = ((insn << 2) & 0x03ffffff);

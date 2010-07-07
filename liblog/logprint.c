@@ -850,7 +850,7 @@ char *android_log_formatLogLine (
  * Returns count bytes written
  */
 
-int android_log_filterAndPrintLogLine(
+int android_log_printLogLine(
     AndroidLogFormat *p_format,
     int fd,
     const AndroidLogEntry *entry)
@@ -859,11 +859,6 @@ int android_log_filterAndPrintLogLine(
     char defaultBuffer[512];
     char *outBuffer = NULL;
     size_t totalLen;
-
-    if (0 == android_log_shouldPrintLine(p_format, entry->tag,
-            entry->priority)) {
-        return 0;
-    }
 
     outBuffer = android_log_formatLogLine(p_format, defaultBuffer,
             sizeof(defaultBuffer), entry, &totalLen);

@@ -42,7 +42,22 @@ TOOLS := \
 	iftop \
 	id \
 	uptime \
-	vmstat
+	vmstat \
+	nandread \
+        ionice
+
+ifndef TINY_TOOLBOX
+    TOOLS += \
+        ln \
+        ls \
+        mount \
+        rm \
+        umount \
+        df \
+        chmod \
+        chown \
+        mv 
+endif
 
 ifndef TINY_TOOLBOX
     TOOLS += \

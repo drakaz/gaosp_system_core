@@ -82,9 +82,7 @@ template<class E> class Vector {
 
     ~Vector() {
         if (mpBase) {
-            for(size_t i = 0; i < mUsed; i++)  {
-                mpBase[mUsed].~E();
-            }
+            clear();
             free(mpBase);
         }
     }
@@ -110,9 +108,19 @@ template<class E> class Vector {
         * ensure(1) = item;
     }
 
-    size_t size() {
+    inline size_t size() {
         return mUsed;
     }
+
+    void clear() {
+         if (mpBase) {
+             size_t used = mUsed;
+             for(size_t i = 0; i < used; i++) {
+                 mpBase[i].~E();
+             }
+         }
+         mUsed = 0;
+     }
 
 private:
     E* ensure(int n) {
@@ -151,6 +159,7 @@ public:
 class Compiler : public ErrorSink {
     typedef int tokenid_t;
     enum TypeTag {
+        TY_UNKNOWN =     -1,
         TY_INT,       // 0
         TY_CHAR,      // 1
         TY_SHORT,     // 2
@@ -164,8 +173,18 @@ class Compiler : public ErrorSink {
         TY_PARAM      // 10
     };
 
+    enum StorageClass {
+        SC_DEFAULT,  // 0
+        SC_AUTO,     // 1
+        SC_REGISTER, // 2
+        SC_STATIC,   // 3
+        SC_EXTERN,   // 4
+        SC_TYPEDEF   // 5
+    };
+
     struct Type {
         TypeTag tag;
+        StorageClass  storageClass;
         tokenid_t id; // For function arguments, global vars, local vars, struct elements
         tokenid_t structTag; // For structs the name of the struct
         int length; // length of array, offset of struct element. -1 means struct is forward defined
@@ -3898,6 +3917,16 @@ class Compiler : public ErrorSink {
         Vector<Mark> mLevelStack;
     };
 
+    struct MacroState {
+        tokenid_t name; // Name of the current macro we are expanding
+        char* dptr; // point to macro text during macro playback
+        int dch; // Saves old value of ch during a macro playback
+    };
+
+#define MACRO_NESTING_MAX 32
+    MacroState macroState[MACRO_NESTING_MAX];
+    int macroLevel; // -1 means not playing any macro.
+
     int ch; // Current input character, or EOF
     tokenid_t tok;      // token
     intptr_t tokc;    // token extra info
@@ -3909,8 +3938,6 @@ class Compiler : public ErrorSink {
     char* glo;  // global variable index
     String mTokenString;
     bool mbSuppressMacroExpansion;
-    char* dptr; // Macro state: Points to macro text during macro playback.
-    int dch;    // Macro state: Saves old value of ch during a macro playback.
     char* pGlobalBase;
     ACCSymbolLookupFn mpSymbolLookupFn;
     void* mpSymbolLookupContext;
@@ -4018,9 +4045,6 @@ class Compiler : public ErrorSink {
 
     static const int LOCAL = 0x200;
 
-    static const int SYM_FORWARD = 0;
-    static const int SYM_DEFINE = 1;
-
     /* tokens in string heap */
     static const int TAG_TOK = ' ';
 
@@ -4102,11 +4126,17 @@ class Compiler : public ErrorSink {
     }
 
     void inp() {
-        if (dptr) {
-            ch = *dptr++;
+        // Close any totally empty macros. We leave them on the stack until now
+        // so that we know which macros are being expanded when checking if the
+        // last token in the macro is a macro that's already being expanded.
+        while (macroLevel >= 0 && macroState[macroLevel].dptr == NULL) {
+            macroLevel--;
+        }
+        if (macroLevel >= 0) {
+            ch = *macroState[macroLevel].dptr++;
             if (ch == 0) {
-                dptr = 0;
-                ch = dch;
+                ch = macroState[macroLevel].dch;
+                macroState[macroLevel].dptr = NULL; // This macro's done
             }
         } else {
             if (mbBumpLine) {
@@ -4271,6 +4301,15 @@ class Compiler : public ErrorSink {
         // fprintf(stderr, "float constant: %s (%d) %g\n", pText, tok, tokd);
     }
 
+    bool currentlyBeingExpanded(tokenid_t id) {
+        for (int i = 0; i <= macroLevel; i++) {
+            if (macroState[macroLevel].name == id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void next() {
         int l, a;
 
@@ -4352,12 +4391,22 @@ class Compiler : public ErrorSink {
             if (! mbSuppressMacroExpansion) {
                 // Is this a macro?
                 char* pMacroDefinition = mTokenTable[tok].mpMacroDefinition;
-                if (pMacroDefinition) {
+                if (pMacroDefinition && !currentlyBeingExpanded(tok)) {
                     // Yes, it is a macro
-                    dptr = pMacroDefinition;
-                    dch = ch;
-                    inp();
-                    next();
+#if 0
+                    printf("Expanding macro %s -> %s",
+                            mTokenString.getUnwrapped(), pMacroDefinition);
+#endif
+                    if (macroLevel >= MACRO_NESTING_MAX-1) {
+                        error("Too many levels of macro recursion.");
+                    } else {
+                        macroLevel++;
+                        macroState[macroLevel].name = tok;
+                        macroState[macroLevel].dptr = pMacroDefinition;
+                        macroState[macroLevel].dch = ch;
+                        inp();
+                        next();
+                    }
                 }
             }
         } else {
@@ -4443,9 +4492,7 @@ class Compiler : public ErrorSink {
         next();
         mbSuppressMacroExpansion = false;
         tokenid_t name = tok;
-        String* pName = new String();
         if (ch == '(') {
-            delete pName;
             error("Defines with arguments not supported");
             return;
         }
@@ -4473,6 +4520,13 @@ class Compiler : public ErrorSink {
         memcpy(pDefn, value.getUnwrapped(), value.len());
         pDefn[value.len()] = 0;
         mTokenTable[name].mpMacroDefinition = pDefn;
+#if 0
+        {
+            String buf;
+            decodeToken(buf, name, true);
+            fprintf(stderr, "define %s = \"%s\"\n", buf.getUnwrapped(), pDefn);
+        }
+#endif
     }
 
     void doPragma() {
@@ -4771,57 +4825,59 @@ class Compiler : public ErrorSink {
                 Type* pDecl = NULL;
                 VariableInfo* pVI = NULL;
                 Type* pFn = pGen->getR0Type();
-                assert(pFn->tag == TY_POINTER);
-                assert(pFn->pHead->tag == TY_FUNC);
-                pDecl = pFn->pHead;
-                pGen->pushR0();
-                Type* pArgList = pDecl->pTail;
-                bool varArgs = pArgList == NULL;
-                /* push args and invert order */
-                a = pGen->beginFunctionCallArguments();
-                int l = 0;
-                int argCount = 0;
-                while (tok != ')' && tok != EOF) {
-                    if (! varArgs && !pArgList) {
-                        error("Unexpected argument.");
-                    }
-                    expr();
-                    pGen->forceR0RVal();
-                    Type* pTargetType;
-                    if (pArgList) {
-                        pTargetType = pArgList->pHead;
-                        pArgList = pArgList->pTail;
-                    } else {
-                        // This is a ... function, just pass arguments in their
-                        // natural type.
-                        pTargetType = pGen->getR0Type();
-                        if (pTargetType->tag == TY_FLOAT) {
-                            pTargetType = mkpDouble;
-                        } else if (pTargetType->tag == TY_ARRAY) {
-                            // Pass arrays by pointer.
-                            pTargetType = pTargetType->pTail;
+                if (pFn->tag == TY_POINTER && pFn->pHead->tag == TY_FUNC) {
+                    pDecl = pFn->pHead;
+                    pGen->pushR0();
+                    Type* pArgList = pDecl->pTail;
+                    bool varArgs = pArgList == NULL;
+                    /* push args and invert order */
+                    a = pGen->beginFunctionCallArguments();
+                    int l = 0;
+                    int argCount = 0;
+                    while (tok != ')' && tok != EOF) {
+                        if (! varArgs && !pArgList) {
+                            error("Unexpected argument.");
                         }
+                        expr();
+                        pGen->forceR0RVal();
+                        Type* pTargetType;
+                        if (pArgList) {
+                            pTargetType = pArgList->pHead;
+                            pArgList = pArgList->pTail;
+                        } else {
+                            // This is a ... function, just pass arguments in their
+                            // natural type.
+                            pTargetType = pGen->getR0Type();
+                            if (pTargetType->tag == TY_FLOAT) {
+                                pTargetType = mkpDouble;
+                            } else if (pTargetType->tag == TY_ARRAY) {
+                                // Pass arrays by pointer.
+                                pTargetType = pTargetType->pTail;
+                            }
+                        }
+                        if (pTargetType->tag == TY_VOID) {
+                            error("Can't pass void value for argument %d",
+                                  argCount + 1);
+                        } else {
+                            l += pGen->storeR0ToArg(l, pTargetType);
+                        }
+                        if (accept(',')) {
+                            // fine
+                        } else if ( tok != ')') {
+                            error("Expected ',' or ')'");
+                        }
+                        argCount += 1;
                     }
-                    if (pTargetType->tag == TY_VOID) {
-                        error("Can't pass void value for argument %d",
-                              argCount + 1);
-                    } else {
-                        l += pGen->storeR0ToArg(l, pTargetType);
+                    if (! varArgs && pArgList) {
+                        error("Expected more argument(s). Saw %d", argCount);
                     }
-                    if (accept(',')) {
-                        // fine
-                    } else if ( tok != ')') {
-                        error("Expected ',' or ')'");
-                    }
-                    argCount += 1;
+                    pGen->endFunctionCallArguments(pDecl, a, l);
+                    skip(')');
+                    pGen->callIndirect(l, pDecl);
+                    pGen->adjustStackAfterCall(pDecl, l, true);
+                } else {
+                    error("Expected a function value to left of '('.");
                 }
-                if (! varArgs && pArgList) {
-                    error("Expected more argument(s). Saw %d", argCount);
-                }
-                pGen->endFunctionCallArguments(pDecl, a, l);
-                skip(')');
-                pGen->callIndirect(l, pDecl);
-                pGen->adjustStackAfterCall(pDecl, l, true);
             } else {
                 break;
             }
@@ -4957,11 +5013,11 @@ class Compiler : public ErrorSink {
         return pGen->gtst(0, 0);
     }
 
-    void block(intptr_t l, bool outermostFunctionBlock) {
+    void block(intptr_t* breakLabel, intptr_t continueAddress, bool outermostFunctionBlock) {
         intptr_t a, n, t;
 
         Type* pBaseType;
-        if ((pBaseType = acceptPrimitiveType())) {
+        if ((pBaseType = acceptPrimitiveType(true))) {
             /* declarations */
             localDeclarations(pBaseType);
         } else if (tok == TOK_IF) {
@@ -4969,12 +5025,12 @@ class Compiler : public ErrorSink {
             skip('(');
             a = test_expr();
             skip(')');
-            block(l, false);
+            block(breakLabel, continueAddress, false);
             if (tok == TOK_ELSE) {
                 next();
                 n = pGen->gjmp(0); /* jmp */
                 pGen->gsym(a);
-                block(l, false);
+                block(breakLabel, continueAddress, false);
                 pGen->gsym(n); /* patch else jmp */
             } else {
                 pGen->gsym(a); /* patch if test */
@@ -5004,7 +5060,7 @@ class Compiler : public ErrorSink {
                 }
             }
             skip(')');
-            block((intptr_t) &a, false);
+            block(&a, n, false);
             pGen->gjmp(n - pCodeBuf->getPC() - pGen->jumpOffset()); /* jmp */
             pGen->gsym(a);
         } else if (tok == '{') {
@@ -5013,7 +5069,7 @@ class Compiler : public ErrorSink {
             }
             next();
             while (tok != '}' && tok != EOF)
-                block(l, false);
+                block(breakLabel, continueAddress, false);
             skip('}');
             if (! outermostFunctionBlock) {
                 mLocals.popLevel();
@@ -5035,7 +5091,17 @@ class Compiler : public ErrorSink {
                 }
                 rsym = pGen->gjmp(rsym); /* jmp */
             } else if (accept(TOK_BREAK)) {
-                *(int *) l = pGen->gjmp(*(int *) l);
+                if (breakLabel) {
+                    *breakLabel = pGen->gjmp(*breakLabel);
+                } else {
+                    error("break statement must be within a for, do, while, or switch statement");
+                }
+            } else if (accept(TOK_CONTINUE)) {
+                if (continueAddress) {
+                    pGen->gjmp(continueAddress - pCodeBuf->getPC() - pGen->jumpOffset());
+                } else {
+                    error("continue statement must be within a for, do, or while statement");
+                }
             } else if (tok != ';')
                 commaExpr();
             skip(';');
@@ -5067,9 +5133,10 @@ class Compiler : public ErrorSink {
     }
 
     Type* createType(TypeTag tag, Type* pHead, Type* pTail) {
-        assert(tag >= TY_INT && tag <= TY_PARAM);
+        assert(tag >= TY_UNKNOWN && tag <= TY_PARAM);
         Type* pType = (Type*) mpCurrentArena->alloc(sizeof(Type));
         memset(pType, 0, sizeof(*pType));
+        pType->storageClass = SC_DEFAULT;
         pType->tag = tag;
         pType->pHead = pHead;
         pType->pTail = pTail;
@@ -5232,38 +5299,124 @@ class Compiler : public ErrorSink {
         fprintf(stderr, "%s\n", buffer.getUnwrapped());
     }
 
-    Type* acceptPrimitiveType() {
-        Type* pType;
-        if (tok == TOK_INT) {
-            pType = mkpInt;
-        } else if (tok == TOK_SHORT) {
-            pType = mkpShort;
-        } else if (tok == TOK_CHAR) {
-            pType = mkpChar;
-        } else if (tok == TOK_VOID) {
-            pType = mkpVoid;
-        } else if (tok == TOK_FLOAT) {
-            pType = mkpFloat;
-        } else if (tok == TOK_DOUBLE) {
-            pType = mkpDouble;
-        } else if (tok == TOK_STRUCT || tok == TOK_UNION) {
-            return acceptStruct();
+    void insertTypeSpecifier(Type** ppType, TypeTag tag) {
+        if (! *ppType) {
+            *ppType = createType(tag, NULL, NULL);
         } else {
-            return NULL;
+            if ((*ppType)->tag != TY_UNKNOWN) {
+                error("Only one type specifier allowed.");
+            } else {
+                (*ppType)->tag = tag;
+            }
         }
-        next();
+    }
+
+    void insertStorageClass(Type** ppType, StorageClass storageClass) {
+        if (! *ppType) {
+            *ppType = createType(TY_UNKNOWN, NULL, NULL);
+        }
+        if ((*ppType)->storageClass != SC_DEFAULT) {
+            error("Only one storage class allowed.");
+        } else {
+            (*ppType)->storageClass = storageClass;
+        }
+    }
+
+    Type* acceptPrimitiveType(bool allowStorageClass) {
+        Type* pType = NULL;
+        for (bool keepGoing = true; keepGoing;) {
+            switch(tok) {
+            case TOK_AUTO:
+                insertStorageClass(&pType, SC_AUTO);
+                break;
+            case TOK_REGISTER:
+                insertStorageClass(&pType, SC_REGISTER);
+                break;
+            case TOK_STATIC:
+                insertStorageClass(&pType, SC_STATIC);
+                break;
+            case TOK_EXTERN:
+                insertStorageClass(&pType, SC_EXTERN);
+                break;
+            case TOK_TYPEDEF:
+                insertStorageClass(&pType, SC_TYPEDEF);
+                break;
+            case TOK_INT:
+                insertTypeSpecifier(&pType, TY_INT);
+                break;
+            case TOK_SHORT:
+                insertTypeSpecifier(&pType, TY_SHORT);
+                break;
+            case TOK_CHAR:
+                insertTypeSpecifier(&pType, TY_CHAR);
+                break;
+            case TOK_VOID:
+                insertTypeSpecifier(&pType, TY_VOID);
+                break;
+            case TOK_FLOAT:
+                insertTypeSpecifier(&pType, TY_FLOAT);
+                break;
+            case TOK_DOUBLE:
+                insertTypeSpecifier(&pType, TY_DOUBLE);
+                break;
+            case TOK_STRUCT:
+            case TOK_UNION:
+            {
+                insertTypeSpecifier(&pType, TY_STRUCT);
+                bool isStruct = (tok == TOK_STRUCT);
+                next();
+                pType = acceptStruct(pType, isStruct);
+                keepGoing = false;
+            }
+                break;
+            default:
+                // Is it a typedef?
+                if (isSymbol(tok)) {
+                    VariableInfo* pV = VI(tok);
+                    if (pV && pV->pType->storageClass == SC_TYPEDEF) {
+                        if (! pType) {
+                            pType = createType(TY_UNKNOWN, NULL, NULL);
+                        }
+                        StorageClass storageClass = pType->storageClass;
+                        *pType = *pV->pType;
+                        pType->storageClass = storageClass;
+                    } else {
+                        keepGoing = false;
+                    }
+                } else {
+                    keepGoing = false;
+                }
+            }
+            if (keepGoing) {
+                next();
+            }
+        }
+        if (pType) {
+            if (pType->tag == TY_UNKNOWN) {
+                pType->tag = TY_INT;
+            }
+            if (allowStorageClass) {
+                switch(pType->storageClass) {
+                case SC_AUTO: error("auto not supported."); break;
+                case SC_REGISTER: error("register not supported."); break;
+                case SC_STATIC: error("static not supported."); break;
+                case SC_EXTERN: error("extern not supported."); break;
+                default: break;
+                }
+            } else {
+                if (pType->storageClass != SC_DEFAULT) {
+                    error("An explicit storage class is not allowed in this type declaration");
+                }
+            }
+        }
         return pType;
     }
 
-    Type* acceptStruct() {
-        assert(tok == TOK_STRUCT || tok == TOK_UNION);
-        bool isStruct = tok == TOK_STRUCT;
-        next();
+    Type* acceptStruct(Type* pStructType, bool isStruct) {
         tokenid_t structTag = acceptSymbol();
         bool isDeclaration = accept('{');
         bool fail = false;
 
-        Type* pStructType = createType(TY_STRUCT, NULL, NULL);
         if (structTag) {
             Token* pToken = &mTokenTable[structTag];
             VariableInfo* pStructInfo = pToken->mpStructInfo;
@@ -5292,9 +5445,11 @@ class Compiler : public ErrorSink {
             if (needToDeclare) {
                 // This is a new struct name
                 pToken->mpStructInfo = mpCurrentSymbolStack->addStructTag(structTag);
+                StorageClass storageClass = pStructType->storageClass;
                 pStructType = createType(TY_STRUCT, NULL, NULL);
                 pStructType->structTag = structTag;
                 pStructType->pHead = pStructType;
+                pStructType->storageClass = storageClass;
                 if (! isDeclaration) {
                     // A forward declaration
                     pStructType->length = -1;
@@ -5312,7 +5467,7 @@ class Compiler : public ErrorSink {
             size_t structAlignment = 0;
             Type** pParamHolder = & pStructType->pHead->pTail;
             while (tok != '}' && tok != EOF) {
-                Type* pPrimitiveType = expectPrimitiveType();
+                Type* pPrimitiveType = expectPrimitiveType(false);
                 if (pPrimitiveType) {
                     while (tok != ';' && tok != EOF) {
                         Type* pItem = acceptDeclaration(pPrimitiveType, true, false);
@@ -5375,6 +5530,7 @@ class Compiler : public ErrorSink {
     Type* acceptDeclaration(Type* pType, bool nameAllowed, bool nameRequired) {
         tokenid_t declName = 0;
         bool reportFailure = false;
+        StorageClass storageClass = pType->storageClass;
         pType = acceptDecl2(pType, declName, nameAllowed,
                                   nameRequired, reportFailure);
         if (declName) {
@@ -5383,6 +5539,7 @@ class Compiler : public ErrorSink {
             pType = createType(pType->tag, pType->pHead, pType->pTail);
             *pType = *pOldType;
             pType->id = declName;
+            pType->storageClass = storageClass;
         } else if (nameRequired) {
             error("Expected a variable name");
         }
@@ -5407,7 +5564,7 @@ class Compiler : public ErrorSink {
 
     /* Used for accepting types that appear in casts */
     Type* acceptCastTypeDeclaration() {
-        Type* pType = acceptPrimitiveType();
+        Type* pType = acceptPrimitiveType(false);
         if (pType) {
             pType = acceptDeclaration(pType, false, false);
         }
@@ -5495,7 +5652,7 @@ class Compiler : public ErrorSink {
         Type* pHead = NULL;
         Type* pTail = NULL;
         for(;;) {
-            Type* pBaseArg = acceptPrimitiveType();
+            Type* pBaseArg = acceptPrimitiveType(false);
             if (pBaseArg) {
                 Type* pArg = acceptDeclaration(pBaseArg, nameAllowed, false);
                 if (pArg) {
@@ -5516,8 +5673,8 @@ class Compiler : public ErrorSink {
         return pHead;
     }
 
-    Type* expectPrimitiveType() {
-        Type* pType = acceptPrimitiveType();
+    Type* expectPrimitiveType(bool allowStorageClass) {
+        Type* pType = acceptPrimitiveType(allowStorageClass);
         if (!pType) {
             String buf;
             decodeToken(buf, tok, true);
@@ -5585,7 +5742,7 @@ class Compiler : public ErrorSink {
                         break;
                     }
                     // Else it's a forward declaration of a function.
-                } else {
+                } else if (pDecl->storageClass != SC_TYPEDEF) {
                     int variableAddress = 0;
                     size_t alignment = pGen->alignmentOf(pDecl);
                     assert(alignment > 0);
@@ -5610,7 +5767,7 @@ class Compiler : public ErrorSink {
                     next();
             }
             skip(';');
-            pBaseType = acceptPrimitiveType();
+            pBaseType = acceptPrimitiveType(true);
         }
     }
 
@@ -5622,8 +5779,12 @@ class Compiler : public ErrorSink {
         if (token == EOF ) {
             buffer.printf("EOF");
         } else if (token == TOK_NUM) {
-            buffer.printf("numeric constant");
-        } else if (token >= 0 && token < 256) {
+            buffer.printf("numeric constant %d(0x%x)", tokc, tokc);
+        } else if (token == TOK_NUM_FLOAT) {
+            buffer.printf("numeric constant float %g", tokd);
+        } else if (token == TOK_NUM_DOUBLE) {
+            buffer.printf("numeric constant double %g", tokd);
+        }  else if (token >= 0 && token < 256) {
             if (token < 32) {
                 buffer.printf("'\\x%02x'", token);
             } else {
@@ -5670,7 +5831,7 @@ class Compiler : public ErrorSink {
     void globalDeclarations() {
         mpCurrentSymbolStack = &mGlobals;
         while (tok != EOF) {
-            Type* pBaseType = expectPrimitiveType();
+            Type* pBaseType = expectPrimitiveType(true);
             if (!pBaseType) {
                 break;
             }
@@ -5687,7 +5848,6 @@ class Compiler : public ErrorSink {
                 skip(';');
                 continue;
             }
-
             if (! isDefined(pDecl->id)) {
                 addGlobalSymbol(pDecl);
             }
@@ -5698,19 +5858,23 @@ class Compiler : public ErrorSink {
             if (pDecl->tag < TY_FUNC) {
                 // it's a variable declaration
                 for(;;) {
-                    if (name && !name->pAddress) {
-                        name->pAddress = (int*) allocGlobalSpace(
-                                                   pGen->alignmentOf(name->pType),
-                                                   pGen->sizeOf(name->pType));
-                    }
-                    if (accept('=')) {
-                        if (tok == TOK_NUM) {
-                            if (name) {
-                                * (int*) name->pAddress = tokc;
+                    if (pDecl->storageClass == SC_TYPEDEF) {
+                        // Do not allocate storage.
+                    } else {
+                        if (name && !name->pAddress) {
+                            name->pAddress = (int*) allocGlobalSpace(
+                                                       pGen->alignmentOf(name->pType),
+                                                       pGen->sizeOf(name->pType));
+                        }
+                        if (accept('=')) {
+                            if (tok == TOK_NUM) {
+                                if (name) {
+                                    * (int*) name->pAddress = tokc;
+                                }
+                                next();
+                            } else {
+                                error("Expected an integer constant");
                             }
-                            next();
-                        } else {
-                            error("Expected an integer constant");
                         }
                     }
                     if (!accept(',')) {
@@ -5763,7 +5927,7 @@ class Compiler : public ErrorSink {
                     rsym = loc = 0;
                     pReturnType = pDecl->pHead;
                     a = pGen->functionEntry(pDecl);
-                    block(0, true);
+                    block(0, 0, true);
                     pGen->gsym(rsym);
                     pGen->functionExit(pDecl, a, loc);
                     mLocals.popLevel();
@@ -5830,8 +5994,7 @@ class Compiler : public ErrorSink {
         rsym = 0;
         loc = 0;
         glo = 0;
-        dptr = 0;
-        dch = 0;
+        macroLevel = -1;
         file = 0;
         pGlobalBase = 0;
         pCodeBuf = 0;

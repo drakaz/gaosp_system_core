@@ -10,6 +10,7 @@ gArmInitialized = False
 gUseArm = True
 gUseX86 = True
 gRunOTCCOutput = True
+gCompileOTCCANSI = True
 
 
 def parseArgv():
@@ -59,7 +60,12 @@ def outputCanRun():
 
 def checkEnvironment():
     global gRunOTCCOutput
-    gRunOTCCOutput = uname() == "Linux" and unameM() != "x86_64" and outputCanRun()
+    global gCompileOTCCANSI
+    osName = uname()
+    gRunOTCCOutput = osName == "Linux" and unameM() != "x86_64" and outputCanRun()
+    # OSX doesn't have stdin/stdout/stderr accessible through dll load symbols, so
+    # we can't compile the ANSI version of the OTCC compiler on OS X.
+    gCompileOTCCANSI = osName == "Linux"
 
 def adb(args):
     return runCmd(["adb"] + args)
@@ -180,12 +186,18 @@ class TestACC(unittest.TestCase):
     def testCompileReturnVal(self):
         self.compileCheck(["data/returnval-ansi.c"], "")
 
-    def testCompileOTCCANSII(self):
-        self.compileCheck(["data/otcc-ansi.c"], "", "", ['x86'])
+    def testCompileOTCCANSI(self):
+        global gCompileOTCCANSI
+        if gCompileOTCCANSI:
+            self.compileCheck(["data/otcc-ansi.c"], "", "", ['x86'])
 
     def testRunReturnVal(self):
         self.compileCheck(["-R", "data/returnval-ansi.c"],
         "Executing compiled code:\nresult: 42\n")
+
+    def testContinue(self):
+        self.compileCheck(["-R", "data/continue.c"],
+        "Executing compiled code:\nresult: 400\n")
 
     def testStringLiteralConcatenation(self):
         self.compileCheck(["-R", "data/testStringConcat.c"],
@@ -311,6 +323,12 @@ Testing read/write (double*): 8.8 9.9
 result: 0""", """a = 99, b = 41
 ga = 100, gb = 44""")
 
+    def testTypedef(self):
+        self.compileCheck(["-R", "data/typedef.c"], """Executing compiled code:
+result: 0""", """x = 3
+(4, 6) = (1, 2) + (3, 4)
+""")
+
     def testPointerArithmetic(self):
         self.compileCheck(["-R", "data/pointers.c"], """Executing compiled code:
 result: 0""", """Pointer difference: 1 4
@@ -371,6 +389,12 @@ result: 0""", """Literals: 1 -1
         self.compileCheck(["-R", "data/film.c"], """Executing compiled code:
 result: 0""", """testing...
 Total bad: 0
+""")
+
+    def testMacros(self):
+        self.compileCheck(["-R", "data/macros.c"], """Executing compiled code:
+result: 0""", """A = 6
+A = 10
 """)
 
     def testpointers2(self):

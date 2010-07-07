@@ -149,8 +149,9 @@ int match_fastboot(usb_ifc_info *info)
     if(!(vendor_id && (info->dev_vendor == vendor_id)) &&
        (info->dev_vendor != 0x18d1) &&  // Google
        (info->dev_vendor != 0x0451) &&
-       (info->dev_vendor != 0x22b8) &&  // Motorola
        (info->dev_vendor != 0x0502) &&
+       (info->dev_vendor != 0x22b8) &&  // Motorola
+       (info->dev_vendor != 0x0955) &&  // Nvidia
        (info->dev_vendor != 0x413c) &&  // DELL
        (info->dev_vendor != 0x0bb4))    // HTC
             return -1;
@@ -167,6 +168,9 @@ int list_devices_callback(usb_ifc_info *info)
 {
     if (match_fastboot(info) == 0) {
         char* serial = info->serial_number;
+        if (!info->writable) {
+            serial = "no permissions"; // like "adb devices"
+        }
         if (!serial[0]) {
             serial = "????????????";
         }
@@ -227,11 +231,12 @@ void usage(void)
             "  -c <cmdline>                             override kernel commandline\n"
             "  -i <vendor id>                           specify a custom USB vendor id\n"
             "  -b <base_addr>                           specify a custom kernel base address\n"
+            "  -n <page size>                           specify the nand page size. default: 2048\n"
         );
     exit(1);
 }
 
-void *load_bootable_image(const char *kernel, const char *ramdisk, 
+void *load_bootable_image(unsigned page_size, const char *kernel, const char *ramdisk,
                           unsigned *sz, const char *cmdline)
 {
     void *kdata = 0, *rdata = 0;
@@ -272,7 +277,7 @@ void *load_bootable_image(const char *kernel, const char *ramdisk,
     }
 
     fprintf(stderr,"creating boot image...\n");
-    bdata = mkbootimg(kdata, ksize, rdata, rsize, 0, 0, 2048, base_addr, &bsize);
+    bdata = mkbootimg(kdata, ksize, rdata, rsize, 0, 0, page_size, base_addr, &bsize);
     if(bdata == 0) {
         fprintf(stderr,"failed to create boot.img\n");
         return 0;
@@ -544,6 +549,7 @@ int main(int argc, char **argv)
     int wants_reboot_bootloader = 0;
     void *data;
     unsigned sz;
+    unsigned page_size = 2048;
 
     skip(1);
     if (argc == 0) {
@@ -556,6 +562,8 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    serial = getenv("ANDROID_SERIAL");
+
     while (argc > 0) {
         if(!strcmp(*argv, "-w")) {
             wants_wipe = 1;
@@ -563,6 +571,11 @@ int main(int argc, char **argv)
         } else if(!strcmp(*argv, "-b")) {
             require(2);
             base_addr = strtoul(argv[1], 0, 16);
+            skip(2);
+        } else if(!strcmp(*argv, "-n")) {
+            require(2);
+            page_size = (unsigned)strtoul(argv[1], NULL, 0);
+            if (!page_size) die("invalid page size");
             skip(2);
         } else if(!strcmp(*argv, "-s")) {
             require(2);
@@ -623,7 +636,7 @@ int main(int argc, char **argv)
                 rname = argv[0];
                 skip(1);
             }
-            data = load_bootable_image(kname, rname, &sz, cmdline);
+            data = load_bootable_image(page_size, kname, rname, &sz, cmdline);
             if (data == 0) return 1;
             fb_queue_download("boot.img", data, sz);
             fb_queue_command("boot", "booting");
@@ -653,7 +666,7 @@ int main(int argc, char **argv)
             } else {
                 skip(3);
             }
-            data = load_bootable_image(kname, rname, &sz, cmdline);
+            data = load_bootable_image(page_size, kname, rname, &sz, cmdline);
             if (data == 0) die("cannot load bootable image");
             fb_queue_flash(pname, data, sz);
         } else if(!strcmp(*argv, "flashall")) {

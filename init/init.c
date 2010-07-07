@@ -35,6 +35,7 @@
 #include <sys/reboot.h>
 
 #include <cutils/sockets.h>
+#include <cutils/iosched_policy.h>
 #include <termios.h>
 #include <linux/kd.h>
 #include <linux/keychord.h>
@@ -221,6 +222,13 @@ void service_start(struct service *svc, const char *dynamic_args)
                                   si->perm, si->uid, si->gid);
             if (s >= 0) {
                 publish_socket(si->name, s);
+            }
+        }
+
+        if (svc->ioprio_class != IoSchedClass_NONE) {
+            if (android_set_ioprio(getpid(), svc->ioprio_class, svc->ioprio_pri)) {
+                ERROR("Failed to set pid %d ioprio = %d,%d: %s\n",
+                      getpid(), svc->ioprio_class, svc->ioprio_pri, strerror(errno));
             }
         }
 
@@ -767,21 +775,31 @@ int open_keychord()
 void handle_keychord(int fd)
 {
     struct service *svc;
+    char* debuggable;
+    char* adb_enabled;
     int ret;
     __u16 id;
 
-    ret = read(fd, &id, sizeof(id));
-    if (ret != sizeof(id)) {
-        ERROR("could not read keychord id\n");
-        return;
-    }
+    // only handle keychords if ro.debuggable is set or adb is enabled.
+    // the logic here is that bugreports should be enabled in userdebug or eng builds
+    // and on user builds for users that are developers.
+    debuggable = property_get("ro.debuggable");
+    adb_enabled = property_get("init.svc.adbd");
+    if ((debuggable && !strcmp(debuggable, "1")) ||
+        (adb_enabled && !strcmp(adb_enabled, "running"))) {
+        ret = read(fd, &id, sizeof(id));
+        if (ret != sizeof(id)) {
+            ERROR("could not read keychord id\n");
+            return;
+        }
 
-    svc = service_find_by_keychord(id);
-    if (svc) {
-        INFO("starting service %s from keychord\n", svc->name);
-        service_start(svc, NULL);
-    } else {
-        ERROR("service for keychord %d not found\n", id);
+        svc = service_find_by_keychord(id);
+        if (svc) {
+            INFO("starting service %s from keychord\n", svc->name);
+            service_start(svc, NULL);
+        } else {
+            ERROR("service for keychord %d not found\n", id);
+        }
     }
 }
 
@@ -853,10 +871,7 @@ int main(int argc, char **argv)
     property_init();
     
     // only listen for keychords if ro.debuggable is true
-    debuggable = property_get("ro.debuggable");
-    if (debuggable && !strcmp(debuggable, "1")) {
-        keychord_fd = open_keychord();
-    }
+    keychord_fd = open_keychord();
 
     if (console[0]) {
         snprintf(tmp, sizeof(tmp), "/dev/%s", console);

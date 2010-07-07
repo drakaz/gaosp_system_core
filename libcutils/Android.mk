@@ -31,13 +31,15 @@ commonSources := \
 	config_utils.c \
 	cpu_info.c \
 	load_file.c \
+	open_memstream.c \
 	strdup16to8.c \
 	strdup8to16.c \
 	record_stream.c \
 	process_name.c \
 	properties.c \
 	threads.c \
-	sched_policy.c
+	sched_policy.c \
+	iosched_policy.c
 
 commonHostSources := \
         ashmem-host.c
@@ -65,7 +67,6 @@ else
         mspace.c \
         selector.c \
         tztime.c \
-        adb_networking.c \
         zygote.c
 
     commonHostSources += \

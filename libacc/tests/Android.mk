@@ -8,9 +8,13 @@ LOCAL_MODULE:= acc
 LOCAL_SRC_FILES:= \
 	main.cpp
 
-LOCAL_SHARED_LIBRARIES := \
-    libacc
+LOCAL_STATIC_LIBRARIES := \
+    libacc \
+    libcutils
 
+LOCAL_LDLIBS := -ldl
+
+    
 LOCAL_MODULE_TAGS := tests
 
 include $(BUILD_HOST_EXECUTABLE)
@@ -25,7 +29,8 @@ LOCAL_SRC_FILES:= \
     disassem.cpp
 
 LOCAL_SHARED_LIBRARIES := \
-    libacc
+    libacc \
+    libdl
 
 LOCAL_CFLAGS := -O0 -g 
 
@@ -41,8 +46,11 @@ LOCAL_MODULE:= accRuntimeTest
 LOCAL_SRC_FILES:= \
 	runtimeTest.cpp
 
-LOCAL_SHARED_LIBRARIES := \
-    libacc
+LOCAL_STATIC_LIBRARIES := \
+    libacc \
+    libcutils
+
+LOCAL_LDLIBS := -ldl
 
 LOCAL_MODULE_TAGS := tests
 
@@ -57,7 +65,8 @@ LOCAL_SRC_FILES:= \
 	runtimeTest.cpp
 
 LOCAL_SHARED_LIBRARIES := \
-    libacc
+    libacc \
+    libdl
 
 LOCAL_CFLAGS := -O0 -g 
 

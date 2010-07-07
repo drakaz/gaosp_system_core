@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (C) 2007 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef _ADB_NETWORKING_H
-#define _ADB_NETWORKING_H 1
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
+#ifndef __CUTILS_IOSCHED_POLICY_H
+#define __CUTILS_IOSCHED_POLICY_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern int adb_networking_connect_fd(int fd, struct sockaddr_in *p_address);
-extern int adb_networking_gethostbyname(const char *name, struct in_addr *p_out_addr);
+typedef enum {
+    IoSchedClass_NONE,
+    IoSchedClass_RT,
+    IoSchedClass_BE,
+    IoSchedClass_IDLE,
+} IoSchedClass;
+
+extern int android_set_ioprio(int pid, IoSchedClass clazz, int ioprio);
+extern int android_get_ioprio(int pid, IoSchedClass *clazz, int *ioprio);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /*_ADB_NETWORKING_H*/
-
+#endif /* __CUTILS_IOSCHED_POLICY_H */ 

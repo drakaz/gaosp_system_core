@@ -235,35 +235,6 @@ static void setstr(u_int8_t *, const char *, size_t);
 static void usage(void);
 
 #ifdef ANDROID
-static void err(int val, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    char *fmt2;
-    asprintf(&fmt2, "%s\n", fmt);
-    vfprintf(stderr, fmt2, ap);
-    free(fmt2);
-    va_end(ap);
-}
-
-static void errx(int val, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    char *fmt2;
-    asprintf(&fmt2, "%s\n", fmt);
-    vfprintf(stderr, fmt2, ap);
-    free(fmt2);
-    va_end(ap);
-}
-
-static void warnx(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    char *fmt2;
-    asprintf(&fmt2, "%s\n", fmt);
-    vfprintf(stderr, fmt2, ap);
-    free(fmt2);
-    va_end(ap);
-}
 #define powerof2(x)     ((((x) - 1) & (x)) == 0)
 #define howmany(x, y)   (((x) + ((y) - 1)) / (y))
 #define MAX(x,y) ((x) > (y) ? (x) : (y))
@@ -443,11 +414,14 @@ newfs_msdos_main(int argc, char *argv[])
     if (!(opt_f || (opt_h && opt_u && opt_S && opt_s && oflag))) {
 	off_t delta;
 	getdiskinfo(fd, fname, dtype, oflag, &bpb);
+        if (opt_s) {
+            bpb.bsec = opt_s;
+        }
 	bpb.bsec -= (opt_ofs / bpb.bps);
 	delta = bpb.bsec % bpb.spt;
 	if (delta != 0) {
-	    warnx("trim %d sectors to adjust to a multiple of %d",
-		(int)delta, bpb.spt);
+	    warnx("trim %d sectors from %d to adjust to a multiple of %d",
+		(int)delta, bpb.bsec, bpb.spt);
 	    bpb.bsec -= delta;
 	}
 	if (bpb.spc == 0) {	/* set defaults */
@@ -745,8 +719,10 @@ newfs_msdos_main(int argc, char *argv[])
 	    }
 	    if ((n = write(fd, img, bpb.bps)) == -1)
 		err(1, "%s", fname);
-	    if ((unsigned)n != bpb.bps)
+	    if ((unsigned)n != bpb.bps) {
 		errx(1, "%s: can't write sector %u", fname, lsn);
+                exit(1);
+            }
 	}
     }
     return 0;
@@ -811,20 +787,31 @@ getdiskinfo(int fd, const char *fname, const char *dtype, __unused int oflag,
     struct hd_geometry geom;
 
     if (ioctl(fd, BLKSSZGET, &bpb->bps)) {
-        fprintf(stderr, "Error getting bytes / sector (%s)", strerror(errno));
+        fprintf(stderr, "Error getting bytes / sector (%s)\n", strerror(errno));
         exit(1);
     }
 
     ckgeom(fname, bpb->bps, "bytes/sector");
 
     if (ioctl(fd, BLKGETSIZE, &bpb->bsec)) {
-        fprintf(stderr, "Error getting blocksize (%s)", strerror(errno));
+        fprintf(stderr, "Error getting blocksize (%s)\n", strerror(errno));
         exit(1);
     }
 
     if (ioctl(fd, HDIO_GETGEO, &geom)) {
-        fprintf(stderr, "Error getting gemoetry (%s)", strerror(errno));
-        exit(1);
+        fprintf(stderr, "Error getting gemoetry (%s) - trying sane values\n", strerror(errno));
+        geom.heads = 64;
+        geom.sectors = 63;
+    }
+
+    if (!geom.heads) {
+        printf("Bogus heads from kernel - setting sane value\n");
+        geom.heads = 64;
+    }
+
+    if (!geom.sectors) {
+        printf("Bogus sectors from kernel - setting sane value\n");
+        geom.sectors = 63;
     }
 
     bpb->spt = geom.sectors;
