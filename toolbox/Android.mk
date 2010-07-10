@@ -59,19 +59,6 @@ ifndef TINY_TOOLBOX
         mv 
 endif
 
-ifndef TINY_TOOLBOX
-    TOOLS += \
-        ln \
-        ls \
-        mount \
-        rm \
-        umount \
-        df \
-        chmod \
-        chown \
-        mv 
-endif
-
 LOCAL_SRC_FILES:= \
 	toolbox.c \
 	$(patsubst %,%.c,$(TOOLS))
