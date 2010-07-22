@@ -336,9 +336,11 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
 #if ADB_HOST
 #define SHELL_COMMAND "/bin/sh"
 #define ALTERNATE_SHELL_COMMAND ""
+#define SHELL_CONFIG_FILE "/system/etc/adb_shell.conf"
 #else
 #define SHELL_COMMAND "/system/bin/sh"
 #define ALTERNATE_SHELL_COMMAND "/sbin/sh"
+#define SHELL_CONFIG_FILE "/system/etc/adb_shell.conf"
 #endif
 
 int service_to_fd(const char *name)
@@ -403,14 +405,33 @@ int service_to_fd(const char *name)
                 ret = create_subprocess(SHELL_COMMAND, "-c", name + 6);
             }
         } else {
+   	    FILE *ConfigFile;
+            ConfigFile = fopen(SHELL_CONFIG_FILE, "r");
             struct stat filecheck;
             ret = -1;
-            if (stat(ALTERNATE_SHELL_COMMAND, &filecheck) == 0) {
-                ret = create_subprocess(ALTERNATE_SHELL_COMMAND, "-", 0);
-            }
-            if (ret == -1) {
-                ret = create_subprocess(SHELL_COMMAND, "-", 0);
-            }
+	    if (ConfigFile != NULL) {
+		char Configshell[256];
+	        fgets(Configshell, 256, ConfigFile);
+		char *Pclean = strchr(Configshell, '\n');
+   		if (Pclean) {
+       			*Pclean = 0;
+    		}
+                ret = -1;
+		if (stat(Configshell, &filecheck) == 0) {
+			ret = create_subprocess(Configshell, "-", 0);
+                }
+		if (ret == -1) {
+		        ret = create_subprocess(SHELL_COMMAND, "-", 0);
+	        }
+	    	fclose(ConfigFile);
+	    } else {
+		    if (stat(ALTERNATE_SHELL_COMMAND, &filecheck) == 0) {
+		        ret = create_subprocess(ALTERNATE_SHELL_COMMAND, "-", 0);
+		    }
+		    if (ret == -1) {
+		        ret = create_subprocess(SHELL_COMMAND, "-", 0);
+		    }
+	    }
         }
 #if !ADB_HOST
     } else if(!strncmp(name, "sync:", 5)) {
