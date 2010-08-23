@@ -64,6 +64,8 @@ int usage(void)
             "       [ --cmdline <kernel-commandline> ]\n"
             "       [ --board <boardname> ]\n"
             "       [ --base <address> ]\n"
+            "       [ --ramdiskaddr <address> ]\n"
+            "       [ --pagesize <size-in-hexadecimal> ]\n"
             "       -o|--output <filename>\n"
             );
     return 1;
@@ -71,7 +73,7 @@ int usage(void)
 
 
 
-static unsigned char padding[2048] = { 0, };
+static unsigned char padding[8192] = { 0, };
 
 int write_padding(int fd, unsigned pagesize, unsigned itemsize)
 {
@@ -146,6 +148,10 @@ int main(int argc, char **argv)
             hdr.ramdisk_addr = base + 0x01000000;
             hdr.second_addr =  base + 0x00F00000;
             hdr.tags_addr =    base + 0x00000100;
+        } else if(!strcmp(arg, "--ramdiskaddr")) {
+            hdr.ramdisk_addr = strtoul(val, 0, 16);
+        } else if (!strcmp(arg, "--pagesize")) {
+            pagesize = hdr.page_size = strtoul(val, 0, 16);
         } else if(!strcmp(arg, "--board")) {
             board = val;
         } else {
