@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -116,6 +117,7 @@ static struct perms_ devperms[] = {
     { "/dev/tty0",          0660,   AID_ROOT,       AID_SYSTEM,     0 },
     { "/dev/graphics/",     0660,   AID_ROOT,       AID_GRAPHICS,   1 },
     { "/dev/msm_hw3dm",     0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
+    { "/dev/msm_rotator",   0660,   AID_SYSTEM,     AID_GRAPHICS,   0 },
     { "/dev/input/",        0660,   AID_ROOT,       AID_INPUT,      1 },
     { "/dev/eac",           0660,   AID_ROOT,       AID_AUDIO,      0 },
     { "/dev/cam",           0660,   AID_ROOT,       AID_CAMERA,     0 },
@@ -137,6 +139,11 @@ static struct perms_ devperms[] = {
     { "/dev/cm3602",        0640,   AID_COMPASS,    AID_SYSTEM,     0 },
     { "/dev/akm8976_pffd",  0640,   AID_COMPASS,    AID_SYSTEM,     0 },
     { "/dev/lightsensor",   0640,   AID_SYSTEM,     AID_SYSTEM,     0 },
+#ifdef AUDIOV2
+    { "/dev/msm_pcm_dec",   0666,   AID_SYSTEM,     AID_AUDIO,      1 },
+    { "/dev/snd/controlC0", 0666,   AID_SYSTEM,     AID_AUDIO,      1 },
+#endif
+
     { "/dev/msm_pcm_out",   0660,   AID_SYSTEM,     AID_AUDIO,      1 },
     { "/dev/msm_pcm_in",    0660,   AID_SYSTEM,     AID_AUDIO,      1 },
     { "/dev/msm_pcm_ctl",   0660,   AID_SYSTEM,     AID_AUDIO,      1 },
@@ -165,6 +172,10 @@ static struct perms_ devperms[] = {
     { "/dev/bus/usb/",      0660,   AID_ROOT,       AID_USB,        1 },
     { "/dev/system_bus_freq", 0660, AID_SYSTEM,       AID_SYSTEM,       0 },
     { "/dev/cpu_dma_latency", 0660, AID_SYSTEM,       AID_SYSTEM,       0 },
+    { "/dev/msm_vidc_reg", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/msm_vidc_dec", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/msm_vidc_enc", 0660, AID_SYSTEM,       AID_AUDIO,       1 },
+    { "/dev/gemini0",   0660,   AID_SYSTEM,     AID_SYSTEM,     1 },
     { NULL, 0, 0, 0, 0 },
 };
 
