@@ -340,11 +340,11 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
 #if ADB_HOST
 #define SHELL_COMMAND "/bin/sh"
 #define ALTERNATE_SHELL_COMMAND ""
-#define SHELL_CONFIG_FILE "/system/etc/adb_shell.conf"
+#define SHELL_CONFIG_FILE "/etc/adb_shell.conf"
 #else
 #define SHELL_COMMAND "/system/bin/sh"
 #define ALTERNATE_SHELL_COMMAND "/sbin/sh"
-#define SHELL_CONFIG_FILE "/system/etc/adb_shell.conf"
+#define SHELL_CONFIG_FILE "/etc/adb_shell.conf"
 #endif
 
 int service_to_fd(const char *name)
