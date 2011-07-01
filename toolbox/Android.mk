@@ -64,12 +64,13 @@ LOCAL_SRC_FILES:= \
 	toolbox.c \
 	$(patsubst %,%.c,$(TOOLS))
 
+LOCAL_STATIC_LIBRARIES := libreboot
 LOCAL_SHARED_LIBRARIES := libcutils libc
 
 LOCAL_MODULE:= toolbox
 
 ifneq ($(TARGET_RECOVERY_PRE_COMMAND),)
-	LOCAL_CFLAGS += -DRECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
+	LOCAL_CFLAGS += -DTARGET_RECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
 endif
 
 # Including this will define $(intermediates).
